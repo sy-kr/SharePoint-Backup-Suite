@@ -62,7 +62,11 @@ LIBRARY COMMANDS:
 ENVIRONMENT VARIABLES (required):
   TENANT_ID             Azure AD / Entra tenant ID
   CLIENT_ID             App registration client ID
+
+AUTHENTICATION (one of the following):
   CLIENT_SECRET         App registration client secret
+  CERT_PATH             Path to .pfx certificate (auto-discovered from ./certs/)
+  CERT_PASSWORD         Certificate password (if any)
 
 See the individual tool help for full options:
   pwsh ./spbackup.ps1 list help

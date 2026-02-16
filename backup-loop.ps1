@@ -989,13 +989,13 @@ function Export-LoopItem {
             $loopPath = Join-Path $itemDir 'page.loop'
             $tmpLoop  = "$loopPath.tmp.$PID"
             Invoke-GraphRequest -Uri "$($script:GRAPH_BASE)/drives/$driveId/items/$itemId/content" -Raw -OutFile $tmpLoop -DriveId $driveId -ItemId $itemId | Out-Null
-            Move-Item -Path $tmpLoop -Destination $loopPath -Force
+            Move-Item -LiteralPath $tmpLoop -Destination $loopPath -Force
             $result.exported += 'page.loop'
             Write-LogJsonl -Level 'INFO' -Event 'export_loop' -DriveId $driveId -ItemId $itemId -Message 'Raw .loop downloaded'
         } catch {
             $conciseErr = Get-ConciseErrorMessage $_.Exception.Message
             Write-LogJsonl -Level 'ERROR' -Event 'export_loop_fail' -DriveId $driveId -ItemId $itemId -Message $conciseErr
-            if (Test-Path "$loopPath.tmp.$PID") { Remove-Item "$loopPath.tmp.$PID" -Force -ErrorAction SilentlyContinue }
+            if (Test-Path -LiteralPath $tmpLoop) { Remove-Item -LiteralPath $tmpLoop -Force -ErrorAction SilentlyContinue }
             $result.error = "Raw loop download failed: $conciseErr"
         }
     }
@@ -1008,20 +1008,20 @@ function Export-LoopItem {
             Invoke-GraphRequest -Uri "$($script:GRAPH_BASE)/drives/$driveId/items/$itemId/content?format=html" `
                 -Raw -OutFile $tmpHtml -DriveId $driveId -ItemId $itemId `
                 -ExtraRetryStatusCodes @(404, 403) | Out-Null
-            Move-Item -Path $tmpHtml -Destination $htmlPath -Force
+            Move-Item -LiteralPath $tmpHtml -Destination $htmlPath -Force
             $result.exported += 'page.html'
             Write-LogJsonl -Level 'INFO' -Event 'export_html' -DriveId $driveId -ItemId $itemId -Message 'HTML exported'
         } catch {
             $conciseErr = Get-ConciseErrorMessage $_.Exception.Message
             Write-LogJsonl -Level 'ERROR' -Event 'export_html_fail' -DriveId $driveId -ItemId $itemId -Message $conciseErr
-            if (Test-Path "$htmlPath.tmp.$PID") { Remove-Item "$htmlPath.tmp.$PID" -Force -ErrorAction SilentlyContinue }
+            if (Test-Path -LiteralPath $tmpHtml) { Remove-Item -LiteralPath $tmpHtml -Force -ErrorAction SilentlyContinue }
             $result.error = "HTML export failed: $conciseErr"
             $ExportMd = $false
         }
     }
 
     # 4) Markdown conversion
-    if ($ExportMd -and (Test-Path $htmlPath)) {
+    if ($ExportMd -and (Test-Path -LiteralPath $htmlPath)) {
         try {
             $mdPath = Join-Path $itemDir 'page.md'
             Convert-HtmlToMarkdown -HtmlPath $htmlPath -MdPath $mdPath | Out-Null
@@ -1035,8 +1035,8 @@ function Export-LoopItem {
     }
 
     # Remove HTML if not explicitly requested (was only needed for MD)
-    if ($ExportMd -and -not $ExportHtml -and (Test-Path $htmlPath)) {
-        Remove-Item $htmlPath -Force -ErrorAction SilentlyContinue
+    if ($ExportMd -and -not $ExportHtml -and (Test-Path -LiteralPath $htmlPath)) {
+        Remove-Item -LiteralPath $htmlPath -Force -ErrorAction SilentlyContinue
         $result.exported = $result.exported | Where-Object { $_ -ne 'page.html' }
     }
 
@@ -1381,7 +1381,7 @@ function Invoke-LoopBackupCommand {
                 $idir = Join-Path $outDir 'items' $rOutDir
                 foreach ($fname in @('meta.json', 'page.loop', 'page.html', 'page.md')) {
                     $fpath = Join-Path $idir $fname
-                    if (Test-Path $fpath) { $hashes[$fname] = Get-FileSHA256 -Path $fpath }
+                    if (Test-Path -LiteralPath $fpath) { $hashes[$fname] = Get-FileSHA256 -Path $fpath }
                 }
             }
 
@@ -1469,7 +1469,7 @@ function Invoke-LoopVerifyCommand {
         $itemOutDir = Get-SafeProp $item 'outputDir'
         $itemDir = Join-Path $outDir 'items' $itemOutDir
 
-        if (-not (Test-Path $itemDir)) {
+        if (-not (Test-Path -LiteralPath $itemDir)) {
             Write-Host "MISSING DIR: $itemOutDir" -ForegroundColor Red
             $missingFiles++
             continue
@@ -1483,7 +1483,7 @@ function Invoke-LoopVerifyCommand {
                 $fpath = Join-Path $itemDir $fname
                 $checkedFiles++
 
-                if (-not (Test-Path $fpath)) {
+                if (-not (Test-Path -LiteralPath $fpath)) {
                     Write-Host "MISSING: $(Join-Path $itemOutDir $fname)" -ForegroundColor Red
                     $missingFiles++
                     continue
@@ -1516,19 +1516,34 @@ function Invoke-LoopDiagnoseCommand {
     Write-Host '=== Loop Backup Diagnostic ===' -ForegroundColor Cyan
     Write-Host ''
 
-    # 1) Env vars
+    # 1) Env vars & auth method
     Write-Host '1. Environment variables' -ForegroundColor Yellow
     $tenantId     = $env:TENANT_ID
     $clientId     = $env:CLIENT_ID
     $clientSecret = $env:CLIENT_SECRET
     Write-Host "   TENANT_ID:     $(if ($tenantId) { $tenantId } else { '(NOT SET)' })"
     Write-Host "   CLIENT_ID:     $(if ($clientId) { $clientId } else { '(NOT SET)' })"
-    Write-Host "   CLIENT_SECRET: $(if ($clientSecret) { $clientSecret.Substring(0, [math]::Min(4, $clientSecret.Length)) + '***' + ' (' + $clientSecret.Length + ' chars)' } else { '(NOT SET)' })"
+    Write-Host "   CLIENT_SECRET: $(if ($clientSecret) { $clientSecret.Substring(0, [math]::Min(4, $clientSecret.Length)) + '***' + ' (' + $clientSecret.Length + ' chars)' } else { '(not set — will use certificate auth)' })"
     Write-Host "   SEARCH_REGION: $(if ($env:SEARCH_REGION) { $env:SEARCH_REGION } else { '(not set — needed for search with app-only auth)' })"
+
+    $cert = Find-Certificate
+    if ($cert) {
+        Write-Host "   CERT:          $($cert.Subject) (thumbprint=$($cert.Thumbprint))" -ForegroundColor Green
+        $cert.Dispose()
+    } elseif (-not $clientSecret) {
+        Write-Host '   CERT:          (not found)' -ForegroundColor Red
+    }
+
+    $authMethod = if ($clientSecret) { 'client_secret' } else { 'certificate' }
+    Write-Host "   Auth method:   $authMethod"
     Write-Host ''
 
-    if (-not $tenantId -or -not $clientId -or -not $clientSecret) {
-        Write-Host '   FAIL: Required environment variables are missing.' -ForegroundColor Red
+    if (-not $tenantId -or -not $clientId) {
+        Write-Host '   FAIL: TENANT_ID and CLIENT_ID are required.' -ForegroundColor Red
+        return
+    }
+    if (-not $clientSecret -and -not (Find-Certificate)) {
+        Write-Host '   FAIL: Neither CLIENT_SECRET nor a certificate is available.' -ForegroundColor Red
         return
     }
 
@@ -1909,7 +1924,11 @@ BACKUP OPTIONS:
 ENVIRONMENT VARIABLES (required):
   TENANT_ID             Azure AD / Entra tenant ID
   CLIENT_ID             App registration client ID
+
+AUTHENTICATION (one of the following):
   CLIENT_SECRET         App registration client secret
+  CERT_PATH             Path to .pfx certificate (auto-discovered from ./certs/)
+  CERT_PASSWORD         Certificate password (if any)
 
 OPTIONAL ENV VARS:
   PYTHON                Path to python executable

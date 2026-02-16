@@ -137,7 +137,7 @@ function Write-AtomicFile {
         [switch]$Binary
     )
     $dir = Split-Path $Path -Parent
-    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     $tmp = "$Path.tmp.$PID"
     try {
         if ($Binary) {
@@ -145,9 +145,9 @@ function Write-AtomicFile {
         } else {
             [System.IO.File]::WriteAllText($tmp, [string]$Content, [System.Text.Encoding]::UTF8)
         }
-        Move-Item -Path $tmp -Destination $Path -Force
+        Move-Item -LiteralPath $tmp -Destination $Path -Force
     } catch {
-        if (Test-Path $tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
         throw
     }
 }
@@ -155,8 +155,8 @@ function Write-AtomicFile {
 function Get-FileSHA256 {
     [CmdletBinding()]
     param([string]$Path)
-    if (-not (Test-Path $Path)) { return '' }
-    $hash = Get-FileHash -Path $Path -Algorithm SHA256
+    if (-not (Test-Path -LiteralPath $Path)) { return '' }
+    $hash = Get-FileHash -LiteralPath $Path -Algorithm SHA256
     return $hash.Hash.ToLowerInvariant()
 }
 
@@ -186,8 +186,8 @@ function Get-ConciseErrorMessage {
 function Read-State {
     [CmdletBinding()]
     param([string]$Path)
-    if (-not (Test-Path $Path)) { return @{} }
-    $raw = Get-Content $Path -Raw -Encoding utf8
+    if (-not (Test-Path -LiteralPath $Path)) { return @{} }
+    $raw = Get-Content -LiteralPath $Path -Raw -Encoding utf8
     $obj = $raw | ConvertFrom-Json -AsHashtable
     if ($null -eq $obj) { return @{} }
     return $obj

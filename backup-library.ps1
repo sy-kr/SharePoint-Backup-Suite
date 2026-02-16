@@ -29,8 +29,8 @@ $script:ProjectRoot = $PSScriptRoot
 . (Join-Path $PSScriptRoot 'lib' 'SiteResolver.ps1')
 
 $script:TOOL_NAME         = 'spbackup library'
-$script:FILE_MAX_RETRIES  = 3
-$script:FILE_RETRY_BASE   = 2      # seconds — base for exponential backoff
+$script:FILE_MAX_RETRIES  = 5
+$script:FILE_RETRY_BASE   = 5      # seconds — base for exponential backoff (5, 10, 20, 40…)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Drive / Library Discovery
@@ -280,7 +280,7 @@ function Download-DriveFile {
     $outPath = Join-Path $OutputDir $safeRelPath
 
     $outDir = Split-Path $outPath -Parent
-    if (-not (Test-Path $outDir)) {
+    if (-not (Test-Path -LiteralPath $outDir)) {
         New-Item -ItemType Directory -Path $outDir -Force | Out-Null
     }
 
@@ -292,9 +292,9 @@ function Download-DriveFile {
             Invoke-GraphRequest -Uri $downloadUri -Raw -OutFile $tmpPath `
                 -DriveId $DriveId -ItemId $itemId | Out-Null
 
-            Move-Item -Path $tmpPath -Destination $outPath -Force
+            Move-Item -LiteralPath $tmpPath -Destination $outPath -Force
             $hash = Get-FileSHA256 -Path $outPath
-            $fileSize = (Get-Item $outPath).Length
+            $fileSize = (Get-Item -LiteralPath $outPath).Length
 
             Write-LogJsonl -Level 'DEBUG' -Event 'file_downloaded' -DriveId $DriveId -ItemId $itemId `
                 -Attempt $attempt -Message "Downloaded: $relPath ($fileSize bytes)"
@@ -309,7 +309,7 @@ function Download-DriveFile {
                 itemName = $itemName
             }
         } catch {
-            if (Test-Path $tmpPath) { Remove-Item $tmpPath -Force -ErrorAction SilentlyContinue }
+            if (Test-Path -LiteralPath $tmpPath) { Remove-Item -LiteralPath $tmpPath -Force -ErrorAction SilentlyContinue }
 
             $conciseErr = Get-ConciseErrorMessage $_.Exception.Message
 
@@ -671,7 +671,7 @@ function Invoke-LibraryVerifyCommand {
             $fRel    = Get-SafeProp $f 'relPath'
             if (-not $fPath) { continue }
             $checkedFiles++
-            if (-not (Test-Path $fPath)) {
+            if (-not (Test-Path -LiteralPath $fPath)) {
                 Write-Host "MISSING: $fRel ($fPath)" -ForegroundColor Red
                 $missingFiles++
             } elseif ($fSha256) {
@@ -702,18 +702,39 @@ function Invoke-LibraryDiagnoseCommand {
     Write-Host '=== Document Library Backup Diagnostic ===' -ForegroundColor Cyan
     Write-Host ''
 
-    # 1) Env vars
+    # 1) Env vars & auth method
     Write-Host '1. Environment variables' -ForegroundColor Yellow
     $tenantId     = $env:TENANT_ID
     $clientId     = $env:CLIENT_ID
     $clientSecret = $env:CLIENT_SECRET
     Write-Host "   TENANT_ID:     $(if ($tenantId) { $tenantId } else { '(NOT SET)' })"
     Write-Host "   CLIENT_ID:     $(if ($clientId) { $clientId } else { '(NOT SET)' })"
-    Write-Host "   CLIENT_SECRET: $(if ($clientSecret) { $clientSecret.Substring(0, [math]::Min(4, $clientSecret.Length)) + '***' + ' (' + $clientSecret.Length + ' chars)' } else { '(NOT SET)' })"
+    Write-Host "   CLIENT_SECRET: $(if ($clientSecret) { $clientSecret.Substring(0, [math]::Min(4, $clientSecret.Length)) + '***' + ' (' + $clientSecret.Length + ' chars)' } else { '(not set — will use certificate auth)' })"
+
+    $cert = Find-Certificate
+    if ($cert) {
+        Write-Host "   CERT:          $($cert.Subject) (thumbprint=$($cert.Thumbprint))" -ForegroundColor Green
+        $cert.Dispose()
+    } elseif (-not $clientSecret) {
+        Write-Host '   CERT:          (not found)' -ForegroundColor Red
+    }
+
+    if (-not $clientSecret -and -not $cert) {
+        $authMethod = 'certificate'
+    } elseif ($clientSecret) {
+        $authMethod = 'client_secret'
+    } else {
+        $authMethod = 'certificate'
+    }
+    Write-Host "   Auth method:   $authMethod"
     Write-Host ''
 
-    if (-not $tenantId -or -not $clientId -or -not $clientSecret) {
-        Write-Host '   FAIL: Required environment variables are missing.' -ForegroundColor Red
+    if (-not $tenantId -or -not $clientId) {
+        Write-Host '   FAIL: TENANT_ID and CLIENT_ID are required.' -ForegroundColor Red
+        return
+    }
+    if (-not $clientSecret -and -not (Find-Certificate)) {
+        Write-Host '   FAIL: Neither CLIENT_SECRET nor a certificate is available.' -ForegroundColor Red
         return
     }
 
@@ -833,7 +854,11 @@ BACKUP OPTIONS:
 ENVIRONMENT VARIABLES (required):
   TENANT_ID             Azure AD / Entra tenant ID
   CLIENT_ID             App registration client ID
+
+AUTHENTICATION (one of the following):
   CLIENT_SECRET         App registration client secret
+  CERT_PATH             Path to .pfx certificate (auto-discovered from ./certs/)
+  CERT_PASSWORD         Certificate password (if any)
 "@
     Write-Host $usage
 }

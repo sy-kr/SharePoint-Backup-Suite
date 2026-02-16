@@ -90,11 +90,16 @@ function Invoke-GraphRequest {
                 }
             }
 
-            $retryable = $statusCode -in @(429, 503, 504)
+            # Retryable: 429 (throttled), 503/504 (overloaded), and 0 (TCP timeout / DNS / socket error)
+            $retryable = $statusCode -in @(0, 429, 503, 504)
             $maxForThis = $script:MAX_RETRIES
             if (-not $retryable -and $ExtraRetryStatusCodes.Count -gt 0 -and $statusCode -in $ExtraRetryStatusCodes) {
                 $retryable = $true
                 $maxForThis = [math]::Min(3, $script:MAX_RETRIES)
+            }
+            # Network-level errors get a longer minimum backoff (SharePoint connection throttling)
+            if ($statusCode -eq 0 -and $retryAfter -lt 10) {
+                $retryAfter = 10
             }
 
             # Parse Graph error code from response body
@@ -193,14 +198,17 @@ function Invoke-SharePointRequest {
             $statusCode = 0
             try { $statusCode = [int]$_.Exception.Response.StatusCode } catch { }
 
-            if ($statusCode -eq 429 -or $statusCode -ge 500) {
+            if ($statusCode -eq 429 -or $statusCode -ge 500 -or $statusCode -eq 0) {
                 if ($attempt -ge $script:MAX_RETRIES) { throw }
                 $retryAfter = 2 * [math]::Pow(2, $attempt - 1)
+                # Network-level errors get a longer minimum backoff
+                if ($statusCode -eq 0 -and $retryAfter -lt 10) { $retryAfter = 10 }
                 try {
                     $ra = $_.Exception.Response.Headers['Retry-After']
                     if ($ra) { $retryAfter = [int]$ra }
                 } catch { }
-                Write-LogJsonl -Level 'WARN' -Event 'sp_throttle' -Url $Uri -Message "HTTP $statusCode — retrying in ${retryAfter}s (attempt $attempt)"
+                $label = if ($statusCode -eq 0) { 'connection error' } else { "HTTP $statusCode" }
+                Write-LogJsonl -Level 'WARN' -Event 'sp_throttle' -Url $Uri -Message "$label — retrying in ${retryAfter}s (attempt $attempt)"
                 Start-Sleep -Seconds $retryAfter
                 continue
             }

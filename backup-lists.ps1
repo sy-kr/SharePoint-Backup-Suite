@@ -221,7 +221,7 @@ function Download-Attachment {
             throw 'No server-relative URL available for attachment.'
         }
 
-        Move-Item -Path $tmpPath -Destination $outPath -Force
+        Move-Item -LiteralPath $tmpPath -Destination $outPath -Force
         Write-LogJsonl -Level 'INFO' -Event 'download_attachment_success' -SiteId $SiteId -ListId $ListId -ItemId $ItemId `
             -Message "Downloaded: $attName"
         return @{
@@ -231,7 +231,7 @@ function Download-Attachment {
             safeName = $safeName
         }
     } catch {
-        if (Test-Path $tmpPath) { Remove-Item $tmpPath -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $tmpPath) { Remove-Item -LiteralPath $tmpPath -Force -ErrorAction SilentlyContinue }
         $conciseErr = Get-ConciseErrorMessage $_.Exception.Message
         Write-LogJsonl -Level 'ERROR' -Event 'download_attachment_fail' -SiteId $SiteId -ListId $ListId -ItemId $ItemId `
             -Message "Failed to download $attName : $conciseErr"
@@ -781,7 +781,7 @@ function Invoke-ListVerifyCommand {
             $attName   = Get-SafeProp $att 'fileName'
             if (-not $attPath) { continue }
             $checkedFiles++
-            if (-not (Test-Path $attPath)) {
+            if (-not (Test-Path -LiteralPath $attPath)) {
                 Write-Host "MISSING: $attName ($attPath)" -ForegroundColor Red
                 $missingFiles++
             } elseif ($attSha256) {
@@ -812,29 +812,35 @@ function Invoke-ListDiagnoseCommand {
     Write-Host '=== List Backup Diagnostic ===' -ForegroundColor Cyan
     Write-Host ''
 
-    # 1) Env vars
+    # 1) Env vars & auth method
     Write-Host '1. Environment variables' -ForegroundColor Yellow
     $tenantId     = $env:TENANT_ID
     $clientId     = $env:CLIENT_ID
     $clientSecret = $env:CLIENT_SECRET
     Write-Host "   TENANT_ID:     $(if ($tenantId) { $tenantId } else { '(NOT SET)' })"
     Write-Host "   CLIENT_ID:     $(if ($clientId) { $clientId } else { '(NOT SET)' })"
-    Write-Host "   CLIENT_SECRET: $(if ($clientSecret) { $clientSecret.Substring(0, [math]::Min(4, $clientSecret.Length)) + '***' + ' (' + $clientSecret.Length + ' chars)' } else { '(NOT SET)' })"
+    Write-Host "   CLIENT_SECRET: $(if ($clientSecret) { $clientSecret.Substring(0, [math]::Min(4, $clientSecret.Length)) + '***' + ' (' + $clientSecret.Length + ' chars)' } else { '(not set — will use certificate auth)' })"
 
-    $certPath = $env:CERT_PATH
-    if (-not $certPath) {
-        $autoCert = Join-Path $script:ProjectRoot 'certs' 'spbackup.pfx'
-        if (Test-Path $autoCert) { $certPath = $autoCert }
-    }
-    if ($certPath -and (Test-Path $certPath)) {
-        Write-Host "   CERT_PATH:     $certPath (found)" -ForegroundColor Green
+    $cert = Find-Certificate
+    if ($cert) {
+        Write-Host "   CERT:          $($cert.Subject) (thumbprint=$($cert.Thumbprint))" -ForegroundColor Green
+        $cert.Dispose()
+    } elseif (-not $clientSecret) {
+        Write-Host '   CERT:          (not found)' -ForegroundColor Red
     } else {
-        Write-Host '   CERT_PATH:     (not found — attachments will be unavailable)' -ForegroundColor DarkYellow
+        Write-Host '   CERT:          (not found — SP REST attachment downloads will be unavailable)' -ForegroundColor DarkYellow
     }
+
+    $authMethod = if ($clientSecret) { 'client_secret' } else { 'certificate' }
+    Write-Host "   Auth method:   $authMethod"
     Write-Host ''
 
-    if (-not $tenantId -or -not $clientId -or -not $clientSecret) {
-        Write-Host '   FAIL: Required environment variables are missing.' -ForegroundColor Red
+    if (-not $tenantId -or -not $clientId) {
+        Write-Host '   FAIL: TENANT_ID and CLIENT_ID are required.' -ForegroundColor Red
+        return
+    }
+    if (-not $clientSecret -and -not (Find-Certificate)) {
+        Write-Host '   FAIL: Neither CLIENT_SECRET nor a certificate is available.' -ForegroundColor Red
         return
     }
 
@@ -927,11 +933,14 @@ BACKUP OPTIONS:
 ENVIRONMENT VARIABLES (required):
   TENANT_ID             Azure AD / Entra tenant ID
   CLIENT_ID             App registration client ID
-  CLIENT_SECRET         App registration client secret
 
-ENVIRONMENT VARIABLES (for attachments):
+AUTHENTICATION (one of the following):
+  CLIENT_SECRET         App registration client secret
   CERT_PATH             Path to .pfx certificate (auto-discovered from ./certs/)
   CERT_PASSWORD         Certificate password (if any)
+
+  Certificate auth is also required for SP REST attachment downloads,
+  even when using CLIENT_SECRET for Graph API.
 "@
     Write-Host $usage
 }
