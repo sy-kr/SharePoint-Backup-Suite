@@ -713,7 +713,8 @@ function Find-PythonExe {
         return $env:PYTHON
     }
 
-    foreach ($candidate in @('python3', 'python')) {
+    $candidates = if ($IsWindows) { @('python', 'python3') } else { @('python3', 'python') }
+    foreach ($candidate in $candidates) {
         $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
         if ($cmd) { return $candidate }
     }
@@ -756,11 +757,15 @@ function Initialize-PythonVenv {
     }
 
     # Find a base Python interpreter
+    # On Windows, prefer 'python' first — 'python3' often resolves to the
+    # Microsoft Store app-execution alias (a stub that opens the Store instead
+    # of running Python). On Unix, prefer 'python3' to avoid Python 2.
     $basePython = $null
     if ($env:PYTHON -and (Get-Command $env:PYTHON -ErrorAction SilentlyContinue)) {
         $basePython = $env:PYTHON
     } else {
-        foreach ($candidate in @('python3', 'python')) {
+        $candidates = if ($IsWindows) { @('python', 'python3') } else { @('python3', 'python') }
+        foreach ($candidate in $candidates) {
             $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
             if ($cmd) { $basePython = $candidate; break }
         }
@@ -1478,14 +1483,14 @@ function Invoke-LoopVerifyCommand {
                 $checkedFiles++
 
                 if (-not (Test-Path $fpath)) {
-                    Write-Host "MISSING: ${itemOutDir}/$fname" -ForegroundColor Red
+                    Write-Host "MISSING: $(Join-Path $itemOutDir $fname)" -ForegroundColor Red
                     $missingFiles++
                     continue
                 }
 
                 $actualHash = Get-FileSHA256 -Path $fpath
                 if ($actualHash -ne $expectedHash) {
-                    Write-Host "HASH MISMATCH: ${itemOutDir}/$fname (expected=$expectedHash, actual=$actualHash)" -ForegroundColor Yellow
+                    Write-Host "HASH MISMATCH: $(Join-Path $itemOutDir $fname) (expected=$expectedHash, actual=$actualHash)" -ForegroundColor Yellow
                     $hashMismatch++
                 } else { $okFiles++ }
             }

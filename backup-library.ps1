@@ -270,7 +270,8 @@ function Download-DriveFile {
     $segments = $relPath -split '/'
     $safeSegments = $segments | ForEach-Object {
         # Preserve original file/folder names as much as possible but make them filesystem-safe
-        $seg = $_ -replace '[<>:"|?*\x00-\x1F]', '_'
+        # Include \ so backslashes aren't misinterpreted as path separators on Windows
+        $seg = $_ -replace '[<>:"\\/|?*\x00-\x1F]', '_'
         $seg = $seg.Trim('.', ' ')
         if ([string]::IsNullOrWhiteSpace($seg)) { $seg = '_' }
         $seg

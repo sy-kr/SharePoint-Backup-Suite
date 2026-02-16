@@ -414,6 +414,18 @@ sudo chmod 600 /etc/spbackup/env
 
 ### Windows Task Scheduler
 
+Import the example XML definitions from `examples/windows/`:
+
+```powershell
+schtasks /Create /TN "SPBackup-List"    /XML "examples\windows\SPBackup-List.xml"
+schtasks /Create /TN "SPBackup-Loop"    /XML "examples\windows\SPBackup-Loop.xml"
+schtasks /Create /TN "SPBackup-Library" /XML "examples\windows\SPBackup-Library.xml"
+```
+
+Edit the XML files first to set your paths, URLs, and credentials. See [examples/windows/README.md](examples/windows/README.md) for full setup instructions.
+
+Or create a task manually:
+
 ```powershell
 schtasks /Create /TN "SPBackup-List" `
   /TR "pwsh -File C:\spbackup\spbackup.ps1 list backup --url 'https://...' --list 'Tasks' --out C:\backups\lists --verbose" `
@@ -548,7 +560,8 @@ tools/
 certs/
 └── README.md              Certificate setup instructions
 examples/
-└── systemd/               systemd service & timer units
+├── systemd/               systemd service & timer units
+└── windows/               Windows Task Scheduler XML definitions
 ```
 
 ---
