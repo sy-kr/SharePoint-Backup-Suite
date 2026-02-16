@@ -396,9 +396,9 @@ Create the credential file:
 ```bash
 sudo mkdir -p /etc/spbackup
 sudo tee /etc/spbackup/env << 'EOF'
-TENANT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-CLIENT_SECRET=your-secret-value
+export TENANT_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+export CLIENT_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+export CLIENT_SECRET="your-client-secret"
 EOF
 sudo chmod 600 /etc/spbackup/env
 ```
