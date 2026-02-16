@@ -3,7 +3,7 @@
 > [!WARNING]
 > **Vibe-coded.** This project was built almost entirely through AI-assisted development (GitHub Copilot / Claude). It has been tested and is currently used in a production environment for performing backups of Microsoft Loop workspaces, Microsoft Lists, and SharePoint Document Libraries. Review the code before trusting it with anything important, and please [open an issue](../../issues) if you find bugs.
 
-A unified PowerShell backup utility for Microsoft 365 — export **Microsoft Lists** to CSV (with attachments), **Microsoft Loop** pages to HTML / Markdown, and **SharePoint Document Libraries** with full folder structure.
+A unified PowerShell backup utility for Microsoft 365 - export **Microsoft Lists** to CSV (with attachments), **Microsoft Loop** pages to HTML / Markdown, and **SharePoint Document Libraries** with full folder structure.
 
 ```bash
 # Back up a Microsoft List (CSV + attachments)
