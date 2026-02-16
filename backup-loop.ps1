@@ -1913,7 +1913,9 @@ BACKUP OPTIONS:
   --mode <mode>         page | workspace | auto (default: auto)
   --raw-loop            Download raw .loop file bytes
   --html                Export HTML (default: on)
+  --no-html             Disable HTML export
   --md                  Export Markdown (default: on)
+  --no-md               Disable Markdown export
   --concurrency <N>     Max parallel downloads (default: 4)
   --since <ISO date>    Only items modified after this date
   --state <path>        State file path (default: <out>/.state.json)
