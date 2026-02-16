@@ -1,5 +1,21 @@
 # Windows Scheduling & Credential Management
 
+## Quick start
+
+1. **Copy files to the project root** (same directory as `spbackup.ps1`):
+   ```powershell
+   Copy-Item examples\Run-Backups.ps1          .
+   Copy-Item examples\windows\Load-Credentials.ps1  .
+   Copy-Item examples\windows\Setup-Credentials.ps1 .
+   Copy-Item examples\windows\Run-Backups.cmd       .
+   ```
+2. **Store credentials** (one-time) — `pwsh .\Setup-Credentials.ps1`
+3. **Edit jobs & SMTP settings** in `Run-Backups.ps1`
+4. **Test interactively** — `pwsh .\Run-Backups.ps1`
+5. **Schedule** — create a Task Scheduler task that runs `Run-Backups.cmd`
+
+---
+
 ## Credential Setup (one-time)
 
 Credentials are stored in **Windows Credential Manager** — encrypted with DPAPI,
@@ -42,31 +58,141 @@ cmdkey /delete:SPBackup:ClientSecret
 
 ---
 
+## Configuring backup jobs
+
+Open `Run-Backups.ps1` and edit the `$Jobs` array. Each job is a hashtable with
+three keys:
+
+| Key | Description |
+|-----|-------------|
+| `Label` | Friendly name shown in logs and email reports |
+| `Tool` | Which backup tool to use: `library`, `list`, or `loop` |
+| `Args` | Array of arguments passed to `spbackup.ps1 <tool>` |
+
+### Document library backup
+
+Backs up all files and folders from a SharePoint document library.
+
+```powershell
+@{
+    Label = 'Team Site - Documents'
+    Tool  = 'library'
+    Args  = @('backup',
+               '--url',     'https://contoso.sharepoint.com/sites/TeamSite',
+               '--library', 'Documents',
+               '--out',     (Join-Path $BackupBase 'TeamSite'))
+}
+```
+
+Required arguments: `--url` (site URL), `--library` (library display name),
+`--out` (output directory).
+
+> **Tip:** Run `spbackup.ps1 library enumerate --url <site-url>` to list all
+> document libraries on a site if you're not sure of the library name.
+
+### Microsoft List backup
+
+Backs up list items to CSV and downloads any attachments.
+
+```powershell
+@{
+    Label = 'Project Tasks'
+    Tool  = 'list'
+    Args  = @('backup',
+               '--url',  'https://contoso.sharepoint.com/sites/Projects/Lists/Tasks/AllItems.aspx',
+               '--out',  (Join-Path $BackupBase 'Lists\ProjectTasks'))
+}
+```
+
+Required arguments: `--url` (list URL — the list name is extracted
+automatically), `--out` (output directory).
+
+You can also specify `--list "Tasks"` or `--list-id <GUID>` explicitly instead
+of relying on URL parsing.
+
+> **Tip:** Run `spbackup.ps1 list enumerate --url <site-url>` to list all
+> lists on a site.
+
+### Microsoft Loop workspace backup
+
+Backs up all pages from a Loop workspace as `.loop` (raw), HTML, and Markdown.
+
+```powershell
+@{
+    Label = 'Team Wiki'
+    Tool  = 'loop'
+    Args  = @('backup',
+               '--url',  'https://loop.cloud.microsoft/p/<your-workspace-id>',
+               '--out',  (Join-Path $BackupBase 'TeamWiki'))
+}
+```
+
+Required arguments: `--url` (Loop workspace URL from your browser), `--out`
+(output directory).
+
+Optional flags: `--no-html` (skip HTML export), `--no-md` (skip Markdown
+export).
+
+> **Tip:** Run `spbackup.ps1 loop resolve --url <loop-url>` to verify the URL
+> resolves to a valid SharePoint storage location.
+
+### Common optional flags
+
+These can be appended to any job's `Args` array:
+
+| Flag | Effect |
+|------|--------|
+| `--verbose` | Detailed per-file logging (useful interactively, **avoid for scheduled runs** — see note below) |
+| `--verify` | Run a verify pass after backup completes |
+| `--concurrency <n>` | Max parallel downloads (default varies by tool) |
+
+> **Warning:** `--verbose` generates very large output. Under Task Scheduler
+> (non-interactive), this can cause pipeline backpressure that dramatically
+> slows the backup. Leave it off for scheduled runs.
+
+### Disabling a job
+
+Comment out the entire block:
+
+```powershell
+# @{
+#     Label = 'Disabled Job'
+#     Tool  = 'library'
+#     Args  = @('backup', '--url', '...', '--library', '...', '--out', '...')
+# }
+```
+
+---
+
 ## How it works
 
+All scripts should be in the **project root** alongside `spbackup.ps1`:
+
 ```
-┌──────────────────┐     ┌──────────────────┐     ┌──────────────────────────┐
-│  Task Scheduler   │────▶│  Run-Backups.cmd  │────▶│    Run-Backups.ps1       │
-│  (triggers)       │     │  (thin launcher)  │     │  ┌────────────────────┐  │
-└──────────────────┘     └──────────────────┘     │  │Load-Credentials.ps1│  │
-                                                   │  │ Cred Manager → env │  │
-                                                   │  └────────────────────┘  │
-                                                   │         │                │
-                                                   │         ▼                │
-                                                   │  spbackup.ps1 list …    │
-                                                   │  spbackup.ps1 loop …    │
-                                                   │  spbackup.ps1 library … │
-                                                   │         │                │
-                                                   │         ▼                │
-                                                   │  Email report (SMTP)     │
-                                                   └──────────────────────────┘
+Task Scheduler --> Run-Backups.cmd --> Run-Backups.ps1
+                   (thin launcher)     |
+                                       +--> Load-Credentials.ps1
+                                       |    (Credential Manager -> env vars)
+                                       |
+                                       +--> spbackup.ps1 library backup ...
+                                       +--> spbackup.ps1 list backup ...
+                                       +--> spbackup.ps1 loop backup ...
+                                       |
+                                       +--> Email report (SMTP)
 ```
 
 **Auth flow:**
 1. `Load-Credentials.ps1` reads `TENANT_ID` + `CLIENT_ID` from Credential Manager (always)
-2. If `CLIENT_SECRET` is stored → sets `$env:CLIENT_SECRET` → client-secret auth
-3. If no secret → `$env:CLIENT_SECRET` stays unset → `Get-GraphToken` falls back to certificate auth
+2. If `CLIENT_SECRET` is stored -> sets `$env:CLIENT_SECRET` -> client-secret auth
+3. If no secret -> `$env:CLIENT_SECRET` stays unset -> `Get-GraphToken` falls back to certificate auth
 4. SharePoint REST API (list attachments) always uses certificate auth regardless
+
+**Output capture:**
+Each job's output is written to a per-job log file under
+`<BackupBase>/orchestrator-logs/job-<label>.log`. This avoids in-memory
+buffering, captures all PowerShell output streams (including `Write-Host`),
+and prevents the pipeline backpressure issues that `Out-String` causes under
+Task Scheduler.
 
 Credentials exist **only** in:
 - Windows Credential Manager (encrypted at rest)
@@ -76,66 +202,54 @@ Credentials exist **only** in:
 
 ## Task Scheduler Setup
 
-### Option A: Single orchestrated task (recommended)
+### 1. Edit Run-Backups.ps1
 
-Edit `Run-Backups.ps1` with your job list, then create one task:
+Update the configuration section at the top:
 
-```powershell
-$action   = New-ScheduledTaskAction -Execute "C:\Backup\examples\windows\Run-Backups.cmd"
-$trigger  = New-ScheduledTaskTrigger -Daily -At 2:00AM
-$settings = New-ScheduledTaskSettingsSet `
-    -ExecutionTimeLimit (New-TimeSpan -Hours 8) `
-    -StartWhenAvailable `
-    -DontStopOnIdleEnd
+- `$SpBackupRoot` — path to the folder containing `spbackup.ps1`
+- `$BackupBase` — root output directory
+- `$SmtpServer` / `$SmtpPort` / `$SmtpFrom` / `$SmtpTo` — email settings
+- `$Jobs` — your backup job definitions (see above)
 
-Register-ScheduledTask -TaskName "SPBackup-All" `
-    -Action $action -Trigger $trigger -Settings $settings `
-    -User "DOMAIN\svc-backup" -Password (Read-Host -AsSecureString "Password")
-```
+### 2. Test interactively
 
-> **Important:** The `-User` must be the same account that ran `Setup-Credentials.ps1`.
-
-### Option B: Import individual XML tasks
-
-Update each XML file with your paths, then import:
+Run from a PowerShell terminal to make sure everything works:
 
 ```powershell
-schtasks /Create /TN "SPBackup-List"    /XML "examples\windows\SPBackup-List.xml"
-schtasks /Create /TN "SPBackup-Loop"    /XML "examples\windows\SPBackup-Loop.xml"
-schtasks /Create /TN "SPBackup-Library" /XML "examples\windows\SPBackup-Library.xml"
+pwsh .\Run-Backups.ps1
 ```
 
-### Option C: Command-line (schtasks.exe)
+### 3. Create a scheduled task
 
-```cmd
-schtasks /create /tn "SPBackup-All" ^
-    /tr "C:\Backup\examples\windows\Run-Backups.cmd" ^
-    /sc daily /st 02:00 ^
-    /ru DOMAIN\svc-backup /rp * ^
-    /rl HIGHEST
-```
+Open **Task Scheduler** and create a new task:
+
+| Setting | Value |
+|---------|-------|
+| **Run as** | The same user account that ran `Setup-Credentials.ps1` |
+| **Run whether user is logged on or not** | Yes |
+| **Trigger** | Daily, e.g. 02:00 AM |
+| **Action** | Start a program |
+| **Program/script** | `C:\spbackup\Run-Backups.cmd` |
+| **Start in** | `C:\spbackup` |
+
+Under **Settings**:
+- Set "Stop the task if it runs longer than" to a reasonable limit (e.g. 12 hours)
+- Enable "If the task fails, restart every" 1 hour, up to 2 times
+- Enable "Start the task only if the computer is on AC power" if applicable
+
+> **Important:** The "Run as" user **must** match the account that ran
+> `Setup-Credentials.ps1`. Credential Manager entries are per-user.
 
 ---
 
-## Schedule
-
-Default staggered schedule for individual tasks:
-
-| Task | Start Time |
-|------|-----------|
-| SPBackup-List | 02:00 |
-| SPBackup-Loop | 02:15 |
-| SPBackup-Library | 02:30 |
-
-Edit `<StartBoundary>` and `<Interval>` in the XML to change.
-
----
-
-## Managing tasks
+## Managing the scheduled task
 
 ```powershell
-# Status
+# Check status
 schtasks /Query /TN "SPBackup-All"
+
+# Run immediately
+schtasks /Run /TN "SPBackup-All"
 
 # Disable
 schtasks /Change /TN "SPBackup-All" /Disable
@@ -146,12 +260,26 @@ schtasks /Delete /TN "SPBackup-All" /F
 
 ---
 
+## Log files
+
+All logs are written to `<BackupBase>/orchestrator-logs/`:
+
+| File | Contents |
+|------|----------|
+| `backup-report-<timestamp>.txt` | Overall summary (also emailed) |
+| `job-<label>.log` | Full output for each individual job |
+
+Failed-job output (last 100 lines) is included in the email report automatically.
+
+---
+
 ## Files
 
-| File | Purpose |
-|------|---------|
-| `Setup-Credentials.ps1` | One-time: stores credentials in Credential Manager |
-| `Load-Credentials.ps1` | Runtime: reads credentials → `$env:` variables |
-| `Run-Backups.ps1` | Orchestrator: runs jobs, collects results, emails report |
-| `Run-Backups.cmd` | Thin launcher for Task Scheduler / double-click |
-| `SPBackup-*.xml` | Individual Task Scheduler XML templates |
+Copy these to the project root (same directory as `spbackup.ps1`):
+
+| File | Source | Purpose |
+|------|--------|---------|
+| `Run-Backups.ps1` | `examples/` | Cross-platform orchestrator (shared with Linux) |
+| `Load-Credentials.ps1` | `examples/windows/` | Runtime: reads credentials into `$env:` variables |
+| `Setup-Credentials.ps1` | `examples/windows/` | One-time: stores credentials in Credential Manager |
+| `Run-Backups.cmd` | `examples/windows/` | Thin launcher for Task Scheduler / double-click |

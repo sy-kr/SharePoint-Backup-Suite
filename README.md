@@ -379,64 +379,47 @@ Checks environment variables, acquires a token, decodes the JWT to show permissi
 
 ## Scheduling
 
-### systemd (Linux)
+An optional orchestrator script (`Run-Backups.ps1`) can run multiple backup
+jobs in sequence and send a consolidated email report. Copy the files you need
+from `examples/` to the project root (same directory as `spbackup.ps1`) and
+edit the configuration. See [examples/README.md](examples/README.md) for full
+details.
 
-Copy and edit the example service and timer files:
+> **Tip:** You don't need the orchestrator for simple setups — you can call
+> `spbackup.ps1` directly from cron or Task Scheduler.
 
-```bash
-sudo cp examples/systemd/spbackup-list.service /etc/systemd/system/
-sudo cp examples/systemd/spbackup-list.timer /etc/systemd/system/
-sudo cp examples/systemd/spbackup-library.service /etc/systemd/system/
-sudo cp examples/systemd/spbackup-library.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now spbackup-list.timer
-sudo systemctl enable --now spbackup-library.timer
-```
-
-Create the credential file:
+### Linux (cron)
 
 ```bash
-sudo mkdir -p /etc/spbackup
-sudo tee /etc/spbackup/env << 'EOF'
-export TENANT_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-export CLIENT_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-export CLIENT_SECRET="your-client-secret"
-EOF
-sudo chmod 600 /etc/spbackup/env
+# Copy files to project root
+cp examples/Run-Backups.ps1      .
+cp examples/linux/run-backups.sh .
 ```
 
-### cron
+Create a credential env file at `/etc/spbackup/env` and add a cron entry:
 
 ```cron
-# Every 6 hours
-0 */6 * * * cd /opt/spbackup && /usr/bin/pwsh ./spbackup.ps1 list backup --url "https://..." --list "Tasks" --out /var/lib/spbackup/lists --verbose >> /var/log/spbackup-list.log 2>&1
-0 */6 * * * cd /opt/spbackup && /usr/bin/pwsh ./spbackup.ps1 loop backup --url "https://..." --out /var/lib/spbackup/loop --verbose >> /var/log/spbackup-loop.log 2>&1
-0 */6 * * * cd /opt/spbackup && /usr/bin/pwsh ./spbackup.ps1 library backup --url "https://..." --library "Documents" --out /var/lib/spbackup/docs --verbose >> /var/log/spbackup-library.log 2>&1
+0 2 * * * cd /opt/spbackup && /opt/spbackup/run-backups.sh >> /var/log/spbackup.log 2>&1
 ```
 
-### Windows Task Scheduler
+See [examples/linux/README.md](examples/linux/README.md) for env file setup,
+systemd timer alternative, and running individual jobs directly.
 
-Import the example XML definitions from `examples/windows/`:
+### Windows (Task Scheduler)
 
 ```powershell
-schtasks /Create /TN "SPBackup-List"    /XML "examples\windows\SPBackup-List.xml"
-schtasks /Create /TN "SPBackup-Loop"    /XML "examples\windows\SPBackup-Loop.xml"
-schtasks /Create /TN "SPBackup-Library" /XML "examples\windows\SPBackup-Library.xml"
+# Copy files to project root
+Copy-Item examples\Run-Backups.ps1                .
+Copy-Item examples\windows\Load-Credentials.ps1   .
+Copy-Item examples\windows\Setup-Credentials.ps1  .
+Copy-Item examples\windows\Run-Backups.cmd         .
 ```
 
-Edit the XML files first to set your paths, URLs, and credentials. See [examples/windows/README.md](examples/windows/README.md) for full setup instructions.
+Store credentials with `Setup-Credentials.ps1`, then create a Task Scheduler
+task pointing to `Run-Backups.cmd`.
 
-Or create a task manually:
-
-```powershell
-schtasks /Create /TN "SPBackup-List" `
-  /TR "pwsh -File C:\spbackup\spbackup.ps1 list backup --url 'https://...' --list 'Tasks' --out C:\backups\lists --verbose" `
-  /SC DAILY /ST 02:00 /RU SYSTEM
-
-schtasks /Create /TN "SPBackup-Library" `
-  /TR "pwsh -File C:\spbackup\spbackup.ps1 library backup --url 'https://...' --library 'Documents' --out C:\backups\docs --verbose" `
-  /SC DAILY /ST 02:30 /RU SYSTEM
-```
+See [examples/windows/README.md](examples/windows/README.md) for credential
+management, job configuration, and Task Scheduler setup.
 
 ---
 
@@ -562,8 +545,16 @@ tools/
 certs/
 └── README.md              Certificate setup instructions
 examples/
-├── systemd/               systemd service & timer units
-└── windows/               Windows Task Scheduler XML definitions
+├── README.md              Overview & getting-started guide
+├── Run-Backups.ps1        Cross-platform orchestrator (copy to project root)
+├── linux/
+│   ├── README.md          Cron / systemd timer setup
+│   └── run-backups.sh     Thin bash wrapper (copy to project root)
+└── windows/
+    ├── README.md          Task Scheduler & Credential Manager setup
+    ├── Load-Credentials.ps1   Reads credentials from Credential Manager
+    ├── Setup-Credentials.ps1  One-time credential storage
+    └── Run-Backups.cmd        Thin launcher for Task Scheduler
 ```
 
 ---
