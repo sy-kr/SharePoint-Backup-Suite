@@ -3,7 +3,7 @@
 > [!WARNING]
 > **Vibe-coded.** This project was built almost entirely through AI-assisted development (GitHub Copilot / Claude). It has been tested and is currently used in a production environment for performing backups of Microsoft Loop workspaces, Microsoft Lists, and SharePoint Document Libraries. Review the code before trusting it with anything important, and please [open an issue](../../issues) if you find bugs.
 
-A unified PowerShell backup utility for Microsoft 365 — export **Microsoft Lists** to CSV (with attachments) and **Microsoft Loop** pages to HTML / Markdown.
+A unified PowerShell backup utility for Microsoft 365 — export **Microsoft Lists** to CSV (with attachments), **Microsoft Loop** pages to HTML / Markdown, and **SharePoint Document Libraries** with full folder structure.
 
 ```bash
 # Back up a Microsoft List (CSV + attachments)
@@ -11,6 +11,9 @@ pwsh ./spbackup.ps1 list backup --url "https://contoso.sharepoint.com/sites/team
 
 # Back up a Loop workspace (HTML + Markdown)
 pwsh ./spbackup.ps1 loop backup --url "https://loop.cloud.microsoft/p/..." --out ./backup/loop
+
+# Back up a SharePoint Document Library (all files)
+pwsh ./spbackup.ps1 library backup --url "https://contoso.sharepoint.com/sites/team" --library "Documents" --out ./backup/docs
 ```
 
 ---
@@ -36,22 +39,25 @@ pwsh ./spbackup.ps1 loop backup --url "https://loop.cloud.microsoft/p/..." --out
 
 ## Features
 
-| Feature | List Backup | Loop Backup |
-|---------|:-----------:|:-----------:|
-| Incremental sync (skip unchanged items) | ✅ | ✅ |
-| Atomic writes (no partial files) | ✅ | ✅ |
-| SHA-256 integrity verification | ✅ | ✅ |
-| JSONL structured logging | ✅ | ✅ |
-| Concurrency control (semaphore) | ✅ | ✅ |
-| Retry with exponential backoff | ✅ | ✅ |
-| Dry-run mode | ✅ | ✅ |
-| CSV export | ✅ | — |
-| List attachment download | ✅ | — |
-| HTML export | — | ✅ |
-| Markdown export (Python / Pandoc) | — | ✅ |
-| Raw `.loop` file download | — | ✅ |
-| Loop URL resolution (6 strategies) | — | ✅ |
-| Certificate-based SharePoint auth | ✅ | — |
+| Feature | List Backup | Loop Backup | Library Backup |
+|---------|:-----------:|:-----------:|:--------------:|
+| Incremental sync (skip unchanged items) | ✅ | ✅ | ✅ |
+| Atomic writes (no partial files) | ✅ | ✅ | — |
+| SHA-256 integrity verification | ✅ | ✅ | ✅ |
+| JSONL structured logging | ✅ | ✅ | ✅ |
+| Concurrency control (semaphore) | ✅ | ✅ | ✅ |
+| Retry with exponential backoff | ✅ | ✅ | ✅ |
+| Dry-run mode | ✅ | ✅ | ✅ |
+| Delta query (hundreds of thousands of files) | — | — | ✅ |
+| Preserves folder structure | — | — | ✅ |
+| Per-file 3-retry with backoff | — | — | ✅ |
+| CSV export | ✅ | — | — |
+| List attachment download | ✅ | — | — |
+| HTML export | — | ✅ | — |
+| Markdown export (Python / Pandoc) | — | ✅ | — |
+| Raw `.loop` file download | — | ✅ | — |
+| Loop URL resolution (6 strategies) | — | ✅ | — |
+| Certificate-based SharePoint auth | ✅ | — | — |
 
 ---
 
@@ -96,6 +102,13 @@ pwsh ./spbackup.ps1 loop backup \
   --url "https://loop.cloud.microsoft/p/..." \
   --out ./backup/loop \
   --verbose
+
+# Back up a SharePoint Document Library
+pwsh ./spbackup.ps1 library backup \
+  --url "https://contoso.sharepoint.com/sites/team" \
+  --library "Documents" \
+  --out ./backup/docs \
+  --verbose
 ```
 
 ### 4. (Optional) Python for Markdown conversion
@@ -119,8 +132,8 @@ Grant these **Application** permissions and click **Grant admin consent**:
 
 | Permission | Type | Required For |
 |------------|------|-------------|
-| `Sites.Read.All` | Application | Site / list enumeration, Loop resolution |
-| `Files.Read.All` | Application | Loop page content download |
+| `Sites.Read.All` | Application | Site / list enumeration, Loop resolution, library drive enumeration |
+| `Files.Read.All` | Application | Loop page content download, document library file download |
 
 ### SharePoint REST API (for list attachments only)
 
@@ -254,6 +267,56 @@ pwsh ./spbackup.ps1 loop backup --url "https://loop.cloud.microsoft/p/..." \
 pwsh ./spbackup.ps1 loop resolve --url "https://loop.cloud.microsoft/p/..."
 ```
 
+### Library Backup
+
+```
+pwsh ./spbackup.ps1 library <command> [options]
+```
+
+| Command | Description |
+|---------|-------------|
+| `backup` | Download all files from a SharePoint document library |
+| `enumerate` | List all document libraries (drives) in a SharePoint site |
+| `verify` | Verify backup integrity against manifest |
+| `diagnose` | Check auth, decode JWT, test Graph API + drive access |
+
+<details>
+<summary><strong>Backup options</strong></summary>
+
+| Option | Description |
+|--------|-------------|
+| `--url <URL>` | SharePoint site URL (required) |
+| `--library <name>` | Document library display name (required unless `--library-id` used) |
+| `--library-id <ID>` | Drive ID (alternative to `--library`) |
+| `--out <dir>` | Output directory (required) |
+| `--concurrency <N>` | Max parallel downloads (default: 4) |
+| `--since <ISO date>` | Only files modified after this date |
+| `--state <path>` | State file path (default: `<out>/.state.json`) |
+| `--force` | Re-download everything, ignoring state / delta |
+| `--dry-run` | Enumerate only, no downloads |
+| `--verbose` | Human-readable console output |
+
+</details>
+
+**Examples:**
+
+```bash
+# List all document libraries in a site
+pwsh ./spbackup.ps1 library enumerate --url "https://contoso.sharepoint.com/sites/team"
+
+# Back up a library by name
+pwsh ./spbackup.ps1 library backup --url "https://contoso.sharepoint.com/sites/team" \
+  --library "Documents" --out ./backup/docs --verbose
+
+# Back up a library by drive ID
+pwsh ./spbackup.ps1 library backup --url "https://contoso.sharepoint.com/sites/team" \
+  --library-id "b!abc123..." --out ./backup/docs
+
+# Incremental backup (only changed files since last run)
+pwsh ./spbackup.ps1 library backup --url "https://contoso.sharepoint.com/sites/team" \
+  --library "Shared Documents" --out ./backup/docs
+```
+
 ---
 
 ## Environment Variables
@@ -273,10 +336,11 @@ pwsh ./spbackup.ps1 loop resolve --url "https://loop.cloud.microsoft/p/..."
 
 ## Incremental Backups
 
-Both tools track state in a `.state.json` file in the output directory:
+All three tools track state in a `.state.json` file in the output directory:
 
 - **List backup** — tracks `lastModifiedDateTime` per list; skips re-export if unchanged
 - **Loop backup** — tracks `eTag` per item; skips re-export if unchanged, falls back to SHA-256 hash comparison
+- **Library backup** — tracks a `deltaLink` from the Graph delta API and per-file `eTag` values; only processes files reported as changed since the last delta query
 
 Use `--force` to re-export everything. Use `--since <ISO date>` to only process recently modified items.
 
@@ -287,6 +351,7 @@ Use `--force` to re-export everything. Use `--since <ISO date>` to only process 
 ```bash
 pwsh ./spbackup.ps1 list verify --out ./backup/lists
 pwsh ./spbackup.ps1 loop verify --out ./backup/loop
+pwsh ./spbackup.ps1 library verify --out ./backup/docs
 ```
 
 Reads `manifest.json` and checks all files against their stored SHA-256 hashes.
@@ -303,6 +368,7 @@ Reads `manifest.json` and checks all files against their stored SHA-256 hashes.
 ```bash
 pwsh ./spbackup.ps1 list diagnose --url "https://..."
 pwsh ./spbackup.ps1 loop diagnose --url "https://..."
+pwsh ./spbackup.ps1 library diagnose --url "https://..."
 ```
 
 Checks environment variables, acquires a token, decodes the JWT to show permissions, and tests Graph API connectivity. Pass a URL for site-specific or SPE container tests.
@@ -318,8 +384,11 @@ Copy and edit the example service and timer files:
 ```bash
 sudo cp examples/systemd/spbackup-list.service /etc/systemd/system/
 sudo cp examples/systemd/spbackup-list.timer /etc/systemd/system/
+sudo cp examples/systemd/spbackup-library.service /etc/systemd/system/
+sudo cp examples/systemd/spbackup-library.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now spbackup-list.timer
+sudo systemctl enable --now spbackup-library.timer
 ```
 
 Create the credential file:
@@ -340,6 +409,7 @@ sudo chmod 600 /etc/spbackup/env
 # Every 6 hours
 0 */6 * * * cd /opt/spbackup && /usr/bin/pwsh ./spbackup.ps1 list backup --url "https://..." --list "Tasks" --out /var/lib/spbackup/lists --verbose >> /var/log/spbackup-list.log 2>&1
 0 */6 * * * cd /opt/spbackup && /usr/bin/pwsh ./spbackup.ps1 loop backup --url "https://..." --out /var/lib/spbackup/loop --verbose >> /var/log/spbackup-loop.log 2>&1
+0 */6 * * * cd /opt/spbackup && /usr/bin/pwsh ./spbackup.ps1 library backup --url "https://..." --library "Documents" --out /var/lib/spbackup/docs --verbose >> /var/log/spbackup-library.log 2>&1
 ```
 
 ### Windows Task Scheduler
@@ -348,6 +418,10 @@ sudo chmod 600 /etc/spbackup/env
 schtasks /Create /TN "SPBackup-List" `
   /TR "pwsh -File C:\spbackup\spbackup.ps1 list backup --url 'https://...' --list 'Tasks' --out C:\backups\lists --verbose" `
   /SC DAILY /ST 02:00 /RU SYSTEM
+
+schtasks /Create /TN "SPBackup-Library" `
+  /TR "pwsh -File C:\spbackup\spbackup.ps1 library backup --url 'https://...' --library 'Documents' --out C:\backups\docs --verbose" `
+  /SC DAILY /ST 02:30 /RU SYSTEM
 ```
 
 ---
@@ -386,6 +460,22 @@ schtasks /Create /TN "SPBackup-List" `
     └── run-<timestamp>.log.jsonl   Structured log
 ```
 
+### Library Backup
+
+```
+<out>/
+├── Folder A/
+│   ├── document.docx               Preserves original folder structure
+│   └── Subfolder/
+│       └── report.pdf
+├── Folder B/
+│   └── spreadsheet.xlsx
+├── manifest.json                   Backup manifest with hashes
+├── .state.json                     Incremental sync state (delta link + eTags)
+└── logs/
+    └── run-<timestamp>.log.jsonl   Structured log
+```
+
 ---
 
 ## Direct Script Invocation
@@ -395,6 +485,7 @@ You can also invoke the backup scripts directly (without the dispatcher):
 ```bash
 pwsh ./backup-lists.ps1 backup --url "https://..." --list "Tasks" --out ./backup
 pwsh ./backup-loop.ps1 backup --url "https://..." --out ./backup
+pwsh ./backup-library.ps1 backup --url "https://..." --library "Documents" --out ./backup
 ```
 
 ---
@@ -428,14 +519,24 @@ Attachments require certificate-based SharePoint REST API auth. Run `diagnose` t
 Set `SEARCH_REGION` env var (e.g., `SEARCH_REGION=NAM`). Required for app-only search.
 </details>
 
+<details>
+<summary><strong>Library backup downloads 0 files</strong></summary>
+
+1. Run `library enumerate --url "..."` to confirm the drive exists and the library name matches exactly
+2. Run `library diagnose --url "..."` to check permissions
+3. If using `--since`, verify the date is not in the future
+4. After the first successful full backup, subsequent runs will use delta queries — if nothing changed, 0 downloads is expected
+</details>
+
 ---
 
 ## Project Structure
 
 ```
-spbackup.ps1              Main entry point (routes to list / loop)
+spbackup.ps1              Main entry point (routes to list / loop / library)
 backup-lists.ps1           Microsoft List backup script
 backup-loop.ps1            Microsoft Loop backup script
+backup-library.ps1         SharePoint Document Library backup script
 lib/
 ├── Common.ps1             Shared helpers (logging, filesystem, state, CLI)
 ├── GraphAuth.ps1          Graph & SharePoint token acquisition

@@ -6,12 +6,14 @@
 
 .DESCRIPTION
     Routes commands to the appropriate backup tool:
-      spbackup.ps1 list  <command> [options]  → backup-lists.ps1
-      spbackup.ps1 loop  <command> [options]  → backup-loop.ps1
+      spbackup.ps1 list    <command> [options]  → backup-lists.ps1
+      spbackup.ps1 loop    <command> [options]  → backup-loop.ps1
+      spbackup.ps1 library <command> [options]  → backup-library.ps1
 
 .EXAMPLE
     pwsh ./spbackup.ps1 list backup --url "https://..." --list "Tasks" --out "./backup"
     pwsh ./spbackup.ps1 loop backup --url "https://..." --out "./backup"
+    pwsh ./spbackup.ps1 library backup --url "https://..." --library "Documents" --out "./backup"
     pwsh ./spbackup.ps1 list enumerate --url "https://..."
     pwsh ./spbackup.ps1 loop resolve --url "https://..."
     pwsh ./spbackup.ps1 --version
@@ -32,6 +34,7 @@ USAGE:
 TOOLS:
   list        Microsoft List backup (CSV export + attachments)
   loop        Microsoft Loop backup (HTML / Markdown / raw .loop)
+  library     SharePoint Document Library backup (file download)
 
 GLOBAL COMMANDS:
   --version   Show version
@@ -50,6 +53,12 @@ LOOP COMMANDS:
   pwsh ./spbackup.ps1 loop diagnose  [--url <URL>]
   pwsh ./spbackup.ps1 loop setup-venv
 
+LIBRARY COMMANDS:
+  pwsh ./spbackup.ps1 library backup    --url <URL> --library <name> --out <dir> [options]
+  pwsh ./spbackup.ps1 library enumerate --url <URL>
+  pwsh ./spbackup.ps1 library verify    --out <dir>
+  pwsh ./spbackup.ps1 library diagnose  [--url <URL>]
+
 ENVIRONMENT VARIABLES (required):
   TENANT_ID             Azure AD / Entra tenant ID
   CLIENT_ID             App registration client ID
@@ -58,6 +67,7 @@ ENVIRONMENT VARIABLES (required):
 See the individual tool help for full options:
   pwsh ./spbackup.ps1 list help
   pwsh ./spbackup.ps1 loop help
+  pwsh ./spbackup.ps1 library help
 "@
     Write-Host $usage
 }
@@ -104,8 +114,17 @@ switch ($tool) {
         & $scriptPath @remaining
         exit $LASTEXITCODE
     }
+    'library' {
+        $scriptPath = Join-Path $PSScriptRoot 'backup-library.ps1'
+        if (-not (Test-Path $scriptPath)) {
+            Write-Error "backup-library.ps1 not found at $scriptPath"
+            exit 1
+        }
+        & $scriptPath @remaining
+        exit $LASTEXITCODE
+    }
     default {
-        Write-Error "Unknown tool: '$tool'. Use 'list' or 'loop'."
+        Write-Error "Unknown tool: '$tool'. Use 'list', 'loop', or 'library'."
         Write-Host ''
         Show-MainUsage
         exit 1

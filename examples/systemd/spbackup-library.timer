@@ -1,0 +1,13 @@
+[Unit]
+Description=Run document library backup every 6 hours
+Requires=spbackup-library.service
+
+[Timer]
+# Run every 6 hours, with a random delay up to 15 minutes to avoid
+# hitting Graph API at the exact same second across multiple deployments.
+OnCalendar=*-*-* 00/6:00:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target
