@@ -3,6 +3,7 @@
 .state.json
 manifest.json
 backup/
+common_commands.txt
 
 # ── Python ──────────────────────────────────────────────────────────────
 tools/.venv/
