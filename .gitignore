@@ -1,0 +1,31 @@
+# ── Backup outputs ──────────────────────────────────────────────────────
+*.log.jsonl
+.state.json
+manifest.json
+backup/
+
+# ── Python ──────────────────────────────────────────────────────────────
+tools/.venv/
+tools/__pycache__/
+__pycache__/
+*.pyc
+*.pyo
+
+# ── Certificates ────────────────
+certs/*.pfx
+certs/*.pem
+certs/*.key
+certs/*.cer
+certs/*.crt
+certs/thumbprint.txt
+
+# ── OS / Editor ─────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
+*~
+
+# ── Environment files with secrets ──────────────────────────────────────
+.env
+*.env
