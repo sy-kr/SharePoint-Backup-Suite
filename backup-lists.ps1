@@ -721,10 +721,11 @@ function Invoke-ListBackupCommand {
         $summaryMsg += ", $downloadedAttachments attachments downloaded"
         if ($attachmentFailures.Count -gt 0) {
             $summaryMsg += ", $($attachmentFailures.Count) attachment(s) failed"
+            $script:ExitCode = 1
         }
     }
     Write-LogJsonl -Level 'INFO' -Event 'backup_complete' -Message $summaryMsg
-    Write-Host $summaryMsg -ForegroundColor Green
+    Write-Host $summaryMsg -ForegroundColor $(if ($attachmentFailures.Count -gt 0) { 'Yellow' } else { 'Green' })
 
     if ($attachmentFailures.Count -gt 0) {
         Write-Host "Attachment failures:" -ForegroundColor Yellow

@@ -1433,9 +1433,10 @@ function Invoke-LoopBackupCommand {
 
     $summaryMsg = "Backup complete: $exportedCount exported, $skippedCount skipped, $($failures.Count) failed (of $($itemsToExport.Count) total)"
     Write-LogJsonl -Level 'INFO' -Event 'backup_complete' -Message $summaryMsg
-    Write-Host $summaryMsg -ForegroundColor Green
+    Write-Host $summaryMsg -ForegroundColor $(if ($failures.Count -gt 0) { 'Yellow' } else { 'Green' })
 
     if ($failures.Count -gt 0) {
+        $script:ExitCode = 1
         Write-Host "Failures:" -ForegroundColor Yellow
         foreach ($f in $failures) {
             Write-Host "  - $($f.name): $($f.reason)" -ForegroundColor Yellow

@@ -26,6 +26,7 @@ Thumbs.db
 .vscode/
 *.swp
 *~
+Run-Backups*
 
 # ── Environment files with secrets ──────────────────────────────────────
 .env
