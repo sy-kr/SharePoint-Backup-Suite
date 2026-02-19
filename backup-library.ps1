@@ -322,17 +322,24 @@ function Download-DriveFile {
 
             $conciseErr = Get-ConciseErrorMessage $_.Exception.Message
 
-            # 404 / itemNotFound = file was deleted on SharePoint but the delta
-            # hasn't caught up yet.  Skip immediately — retrying won't help.
+            # 404 / itemNotFound — likely deleted on SharePoint but the delta
+            # hasn't caught up yet.  Retry a few times (Graph can be transiently
+            # flaky) then treat as deleted and move on.
             if ($conciseErr -match '404|itemNotFound') {
+                if ($attempt -lt 3) {
+                    Write-LogJsonl -Level 'WARN' -Event 'file_download_retry' -DriveId $DriveId -ItemId $itemId `
+                        -Attempt $attempt -Message "404 for $relPath — retrying in 3 s ($attempt/3)"
+                    Start-Sleep -Seconds 3
+                    continue
+                }
                 Write-LogJsonl -Level 'WARN' -Event 'file_download_deleted' -DriveId $DriveId -ItemId $itemId `
-                    -Message "Skipping (deleted on SharePoint): $relPath"
+                    -Message "Skipping after 3 attempts (deleted on SharePoint): $relPath"
                 return @{
                     success  = $false
                     relPath  = $relPath
                     itemId   = $itemId
                     itemName = $itemName
-                    error    = 'Deleted on SharePoint (404)'
+                    error    = 'Deleted on SharePoint (404 x3)'
                     deleted  = $true
                 }
             }
