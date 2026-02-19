@@ -322,6 +322,21 @@ function Download-DriveFile {
 
             $conciseErr = Get-ConciseErrorMessage $_.Exception.Message
 
+            # 404 / itemNotFound = file was deleted on SharePoint but the delta
+            # hasn't caught up yet.  Skip immediately — retrying won't help.
+            if ($conciseErr -match '404|itemNotFound') {
+                Write-LogJsonl -Level 'WARN' -Event 'file_download_deleted' -DriveId $DriveId -ItemId $itemId `
+                    -Message "Skipping (deleted on SharePoint): $relPath"
+                return @{
+                    success  = $false
+                    relPath  = $relPath
+                    itemId   = $itemId
+                    itemName = $itemName
+                    error    = 'Deleted on SharePoint (404)'
+                    deleted  = $true
+                }
+            }
+
             if ($attempt -lt $script:FILE_MAX_RETRIES) {
                 $delay = $script:FILE_RETRY_BASE * [math]::Pow(2, $attempt - 1) + (Get-Random -Minimum 0.0 -Maximum 1.0)
                 Write-LogJsonl -Level 'WARN' -Event 'file_download_retry' -DriveId $DriveId -ItemId $itemId `
@@ -556,6 +571,7 @@ function Invoke-LibraryBackupCommand {
     $failedFiles     = [System.Collections.Generic.List[object]]::new()
     $totalBytes      = [long]0
     $downloadCount   = 0
+    $deletedDuringDownload = 0
 
     foreach ($file in $filesToDownload) {
         $downloadCount++
@@ -585,6 +601,12 @@ function Invoke-LibraryBackupCommand {
             $fId   = Get-SafeProp $file 'id'
             $fEtag = Get-SafeProp $file 'eTag'
             if ($fId -and $fEtag) { $fileEtags[$fId] = $fEtag }
+        } elseif ($result['deleted']) {
+            # File was deleted on SharePoint but delta hadn't caught up yet.
+            # Remove its eTag so we don't track a stale entry.
+            $fId = Get-SafeProp $file 'id'
+            if ($fId) { $fileEtags.Remove($fId) | Out-Null }
+            $deletedDuringDownload++
         } else {
             $failedFiles.Add([ordered]@{
                 relPath  = $result['relPath']
@@ -642,6 +664,9 @@ function Invoke-LibraryBackupCommand {
     }
 
     $summaryMsg = "Backup complete: $($downloadedFiles.Count) file(s) downloaded ($sizeDisplay)"
+    if ($deletedDuringDownload -gt 0) {
+        $summaryMsg += ", $deletedDuringDownload skipped (deleted on SharePoint)"
+    }
     if ($skippedCount -gt 0) {
         $summaryMsg += ", $skippedCount skipped (unchanged)"
     }

@@ -68,6 +68,127 @@ function Write-Console {
     Write-Host $Object @p
 }
 
+function Get-JobFileChanges {
+    <#
+    .SYNOPSIS
+        Parse a job log for file-level activity (downloads, exports, deletions).
+        Requires --verbose on the backup job so [LEVEL] event lines are present.
+    .OUTPUTS
+        Ordered hashtable with Downloaded, Exported, Deleted (count), Failed lists.
+    #>
+    param(
+        [string]$JobLog,
+        [string]$Tool
+    )
+    $changes = [ordered]@{
+        Downloaded = [System.Collections.Generic.List[string]]::new()
+        Exported   = [System.Collections.Generic.List[string]]::new()
+        Deleted    = 0
+        Failed     = [System.Collections.Generic.List[string]]::new()
+    }
+    if (-not $JobLog -or -not (Test-Path -LiteralPath $JobLog)) { return $changes }
+
+    try {
+        switch ($Tool) {
+            'library' {
+                foreach ($line in [System.IO.File]::ReadLines($JobLog)) {
+                    if ($line -match '\] file_downloaded - Downloaded: (.+) \(\d+ bytes\)') {
+                        $changes.Downloaded.Add($Matches[1])
+                    }
+                    elseif ($line -match '\] delta_deletions - (\d+) file') {
+                        $changes.Deleted += [int]$Matches[1]
+                    }
+                    elseif ($line -match '\] file_download_deleted - Skipping \(deleted.+?\): (.+)') {
+                        $changes.Deleted++
+                    }
+                    elseif ($line -match '\] file_download_fail - .+?: (.+?) —') {
+                        $changes.Failed.Add($Matches[1])
+                    }
+                }
+            }
+            'loop' {
+                $lastExportName = ''
+                foreach ($line in [System.IO.File]::ReadLines($JobLog)) {
+                    if ($line -match '\] export_start - Exporting: (.+)') {
+                        $lastExportName = $Matches[1].Trim()
+                    }
+                    elseif ($line -match '\] export_complete - Done: (.+)') {
+                        $changes.Exported.Add($Matches[1].Trim())
+                    }
+                    elseif ($line -match '\] export_meta_fail - ' -or $line -match '\] export_item_error - ') {
+                        $failName = if ($lastExportName) { $lastExportName } else { '(unknown)' }
+                        if (-not $changes.Failed.Contains($failName)) {
+                            $changes.Failed.Add($failName)
+                        }
+                    }
+                }
+            }
+            'list' {
+                foreach ($line in [System.IO.File]::ReadLines($JobLog)) {
+                    if ($line -match '\] download_attachment_success - Downloaded: (.+)') {
+                        $changes.Downloaded.Add($Matches[1].Trim())
+                    }
+                    elseif ($line -match '\] items_fetched - Found (\d+) items') {
+                        $count = [int]$Matches[1]
+                        if ($count -gt 0) {
+                            $changes.Exported.Add("$count list item(s) exported to CSV")
+                        }
+                    }
+                }
+            }
+        }
+    } catch {
+        # Non-fatal — changes section will be empty
+    }
+    return $changes
+}
+
+function Format-FileChangeLines {
+    <#
+    .SYNOPSIS
+        Render file-change info as report lines.  Returns nothing if no activity.
+    #>
+    param([System.Collections.Specialized.OrderedDictionary]$Changes, [int]$MaxItems = 25)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $hasAny = ($Changes.Downloaded.Count + $Changes.Exported.Count + $Changes.Failed.Count + $Changes.Deleted) -gt 0
+    if (-not $hasAny) { return $lines }
+
+    if ($Changes.Downloaded.Count -gt 0) {
+        $lines.Add("      Downloaded ($($Changes.Downloaded.Count)):")
+        $shown = [math]::Min($Changes.Downloaded.Count, $MaxItems)
+        for ($i = 0; $i -lt $shown; $i++) {
+            $lines.Add("        - $($Changes.Downloaded[$i])")
+        }
+        if ($Changes.Downloaded.Count -gt $MaxItems) {
+            $lines.Add("        ... and $($Changes.Downloaded.Count - $MaxItems) more")
+        }
+    }
+    if ($Changes.Exported.Count -gt 0) {
+        $lines.Add("      Exported ($($Changes.Exported.Count)):")
+        $shown = [math]::Min($Changes.Exported.Count, $MaxItems)
+        for ($i = 0; $i -lt $shown; $i++) {
+            $lines.Add("        - $($Changes.Exported[$i])")
+        }
+        if ($Changes.Exported.Count -gt $MaxItems) {
+            $lines.Add("        ... and $($Changes.Exported.Count - $MaxItems) more")
+        }
+    }
+    if ($Changes.Deleted -gt 0) {
+        $lines.Add("      Deleted on SharePoint: $($Changes.Deleted)")
+    }
+    if ($Changes.Failed.Count -gt 0) {
+        $lines.Add("      Failed ($($Changes.Failed.Count)):")
+        $shown = [math]::Min($Changes.Failed.Count, $MaxItems)
+        for ($i = 0; $i -lt $shown; $i++) {
+            $lines.Add("        - $($Changes.Failed[$i])")
+        }
+        if ($Changes.Failed.Count -gt $MaxItems) {
+            $lines.Add("        ... and $($Changes.Failed.Count - $MaxItems) more")
+        }
+    }
+    return $lines
+}
+
 # -----------------------------------------------------------------------------
 # CONFIGURATION - edit these values
 # -----------------------------------------------------------------------------
@@ -237,6 +358,7 @@ foreach ($job in $Jobs) {
         ExitCode   = $exitCode
         Duration   = $durationStr
         Summary    = ''
+        Changes    = $null
         StartTime  = $jobStart.ToString('HH:mm:ss')
         EndTime    = $jobEnd.ToString('HH:mm:ss')
         JobLog     = $jobLog
@@ -257,6 +379,9 @@ foreach ($job in $Jobs) {
     } catch {
         $result.Summary = '(could not parse output)'
     }
+
+    # Extract file-level changes from job log (best-effort, non-fatal)
+    $result.Changes = Get-JobFileChanges -JobLog $jobLog -Tool $tool
 }
 
 $runEnd      = Get-Date
@@ -292,6 +417,15 @@ foreach ($r in $results) {
         $reportLines.Add("    Summary:  $($r.Summary)")
     }
     $reportLines.Add("    Log:      $($r.JobLog)")
+
+    # File-level changes (only when --verbose is in the job args)
+    if ($r.Changes) {
+        [array]$changeLines = @(Format-FileChangeLines -Changes $r.Changes)
+        if ($changeLines.Count -gt 0) {
+            $reportLines.Add('    Changes:')
+            foreach ($cl in $changeLines) { $reportLines.Add($cl) }
+        }
+    }
 }
 
 $reportLines.Add('')
