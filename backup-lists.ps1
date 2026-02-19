@@ -221,7 +221,7 @@ function Download-Attachment {
             throw 'No server-relative URL available for attachment.'
         }
 
-        Move-Item -LiteralPath $tmpPath -Destination $outPath -Force
+        Move-FileReliable -Source $tmpPath -Destination $outPath
         Write-LogJsonl -Level 'INFO' -Event 'download_attachment_success' -SiteId $SiteId -ListId $ListId -ItemId $ItemId `
             -Message "Downloaded: $attName"
         return @{

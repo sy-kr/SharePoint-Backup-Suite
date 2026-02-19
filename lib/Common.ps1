@@ -129,6 +129,35 @@ function New-SafeName {
     return $safe
 }
 
+function Move-FileReliable {
+    <#
+    .SYNOPSIS
+        Moves a file to a destination, overwriting if it exists.
+        Uses Remove + Move (not the 3-arg .NET overwrite) to avoid
+        "Access to the path is denied" on Windows when the target has
+        ReadOnly attributes or antivirus holds a transient lock.
+        Retries up to 3 times with exponential back-off.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Destination
+    )
+    $maxRetries = 3
+    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+        try {
+            if (Test-Path -LiteralPath $Destination) {
+                Remove-Item -LiteralPath $Destination -Force
+            }
+            [System.IO.File]::Move($Source, $Destination)
+            return
+        } catch {
+            if ($attempt -ge $maxRetries) { throw }
+            Start-Sleep -Milliseconds (200 * $attempt)
+        }
+    }
+}
+
 function Write-AtomicFile {
     [CmdletBinding()]
     param(
@@ -145,7 +174,7 @@ function Write-AtomicFile {
         } else {
             [System.IO.File]::WriteAllText($tmp, [string]$Content, [System.Text.Encoding]::UTF8)
         }
-        Move-Item -LiteralPath $tmp -Destination $Path -Force
+        Move-FileReliable -Source $tmp -Destination $Path
     } catch {
         if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
         throw

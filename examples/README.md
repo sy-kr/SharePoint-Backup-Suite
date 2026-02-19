@@ -6,7 +6,7 @@ Example scripts and configuration for automating SharePoint backups.
 
 | File / Folder | Description |
 |---------------|-------------|
-| [`Run-Backups.ps1`](Run-Backups.ps1) | Cross-platform orchestrator — runs multiple backup jobs and sends an email report |
+| [`Run-Backups.ps1`](Run-Backups.ps1) | Cross-platform orchestrator — runs multiple backup jobs and sends an email report. Supports `-Headless` for scheduled (silent) runs. |
 | [`windows/`](windows/) | Windows-specific: Credential Manager integration, `.cmd` launcher, Task Scheduler setup |
 | [`linux/`](linux/) | Linux-specific: thin shell wrapper, cron / systemd timer setup |
 

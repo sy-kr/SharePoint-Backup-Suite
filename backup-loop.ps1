@@ -989,7 +989,7 @@ function Export-LoopItem {
             $loopPath = Join-Path $itemDir 'page.loop'
             $tmpLoop  = "$loopPath.tmp.$PID"
             Invoke-GraphRequest -Uri "$($script:GRAPH_BASE)/drives/$driveId/items/$itemId/content" -Raw -OutFile $tmpLoop -DriveId $driveId -ItemId $itemId | Out-Null
-            Move-Item -LiteralPath $tmpLoop -Destination $loopPath -Force
+            Move-FileReliable -Source $tmpLoop -Destination $loopPath
             $result.exported += 'page.loop'
             Write-LogJsonl -Level 'INFO' -Event 'export_loop' -DriveId $driveId -ItemId $itemId -Message 'Raw .loop downloaded'
         } catch {
@@ -1008,7 +1008,7 @@ function Export-LoopItem {
             Invoke-GraphRequest -Uri "$($script:GRAPH_BASE)/drives/$driveId/items/$itemId/content?format=html" `
                 -Raw -OutFile $tmpHtml -DriveId $driveId -ItemId $itemId `
                 -ExtraRetryStatusCodes @(404, 403) | Out-Null
-            Move-Item -LiteralPath $tmpHtml -Destination $htmlPath -Force
+            Move-FileReliable -Source $tmpHtml -Destination $htmlPath
             $result.exported += 'page.html'
             Write-LogJsonl -Level 'INFO' -Event 'export_html' -DriveId $driveId -ItemId $itemId -Message 'HTML exported'
         } catch {

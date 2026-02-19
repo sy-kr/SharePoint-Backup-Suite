@@ -142,13 +142,14 @@ These can be appended to any job's `Args` array:
 
 | Flag | Effect |
 |------|--------|
-| `--verbose` | Detailed per-file logging (useful interactively, **avoid for scheduled runs** — see note below) |
+| `--verbose` | Detailed per-file logging (visible interactively; suppressed in headless mode) |
 | `--verify` | Run a verify pass after backup completes |
 | `--concurrency <n>` | Max parallel downloads (default varies by tool) |
 
-> **Warning:** `--verbose` generates very large output. Under Task Scheduler
-> (non-interactive), this can cause pipeline backpressure that dramatically
-> slows the backup. Leave it off for scheduled runs.
+> **Tip:** `--verbose` is safe for both interactive and scheduled runs.
+> In interactive mode the output streams to the console in real time.
+> In headless mode (Task Scheduler) the output only goes to per-job log
+> files — there is no pipeline backpressure.
 
 ### Disabling a job
 
@@ -189,10 +190,14 @@ Task Scheduler --> Run-Backups.cmd --> Run-Backups.ps1
 
 **Output capture:**
 Each job's output is written to a per-job log file under
-`<BackupBase>/orchestrator-logs/job-<label>.log`. This avoids in-memory
-buffering, captures all PowerShell output streams (including `Write-Host`),
-and prevents the pipeline backpressure issues that `Out-String` causes under
-Task Scheduler.
+`<BackupBase>/orchestrator-logs/job-<label>.log`.
+
+- **Interactive mode** (default): `Tee-Object` streams output to both the
+  console and the log file, so `--verbose` logging is visible in real time.
+- **Headless mode** (`-Headless`): `Out-File` sends everything to the log
+  only — zero console output. Progress bars are also suppressed.
+
+The `.cmd` launcher and Task Scheduler should always use `-Headless`.
 
 Credentials exist **only** in:
 - Windows Credential Manager (encrypted at rest)
@@ -218,6 +223,12 @@ Run from a PowerShell terminal to make sure everything works:
 ```powershell
 pwsh .\Run-Backups.ps1
 ```
+
+This runs in **interactive mode** — you'll see all job output (including
+`--verbose` logging) in real time, as well as the summary report.
+
+> The `.cmd` launcher and Task Scheduler use `-Headless`, which suppresses
+> all console output. The report is still saved to disk and emailed.
 
 ### 3. Create a scheduled task
 

@@ -14,6 +14,15 @@
     On Linux, set environment variables before running (e.g. via an env
     file or wrapper script).
 
+    By default (interactive), job output is streamed to both the console and
+    per-job log files via Tee-Object, so --verbose output is visible in real
+    time.
+
+    Use -Headless when running from Task Scheduler, cron, or other
+    non-interactive hosts.  This suppresses all console output (including
+    progress bars), writing only to log files.  The report is still saved
+    to disk and emailed.
+
     Exit codes from spbackup.ps1:
       0  - success (all items backed up)
       1  - partial failure (some downloads / exports failed) or fatal error
@@ -24,18 +33,40 @@
       1  - one or more jobs returned non-zero
 
 .EXAMPLE
-    # Windows (Task Scheduler or interactively):
+    # Interactive — verbose job output streams to console and log file:
     pwsh -NoProfile -File "C:\spbackup\Run-Backups.ps1"
 
-    # Linux (cron or interactively):
-    pwsh -NoProfile -File /opt/spbackup/Run-Backups.ps1
+    # Headless (Task Scheduler / cron) — all output goes to log files only:
+    pwsh -NoProfile -File "C:\spbackup\Run-Backups.ps1" -Headless
 
 .NOTES
     Edit the CONFIGURATION section below before first use.
 #>
+param(
+    [switch]$Headless
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Suppress progress bars and console output in headless mode to prevent
+# pipeline congestion under Task Scheduler or other non-interactive hosts.
+# The report is still written to a log file and emailed.
+if ($Headless) {
+    $ProgressPreference = 'SilentlyContinue'
+}
+
+function Write-Console {
+    <# Write-Host wrapper that is suppressed in headless mode. #>
+    param(
+        [Parameter(Position = 0)] [object]$Object = '',
+        [string]$ForegroundColor
+    )
+    if ($Headless) { return }
+    $p = @{}
+    if ($ForegroundColor) { $p['ForegroundColor'] = $ForegroundColor }
+    Write-Host $Object @p
+}
 
 # -----------------------------------------------------------------------------
 # CONFIGURATION - edit these values
@@ -129,13 +160,13 @@ $dateStr    = $runStart.ToString('dd-MM-yyyy')
 $results    = [System.Collections.Generic.List[object]]::new()
 $anyFailure = $false
 
-Write-Host ''
-Write-Host "=== SharePoint Backup Orchestrator ===" -ForegroundColor Cyan
-Write-Host "  Host:    $hostName"
-Write-Host "  Date:    $dateStr"
-Write-Host "  Jobs:    $($Jobs.Count)"
-Write-Host "  Output:  $BackupBase"
-Write-Host ''
+Write-Console ''
+Write-Console "=== SharePoint Backup Orchestrator ===" -ForegroundColor Cyan
+Write-Console "  Host:    $hostName"
+Write-Console "  Date:    $dateStr"
+Write-Console "  Jobs:    $($Jobs.Count)"
+Write-Console "  Output:  $BackupBase"
+Write-Console ''
 
 # Ensure per-job log directory exists (used by output capture below)
 $logDir = Join-Path $BackupBase 'orchestrator-logs'
@@ -154,20 +185,24 @@ foreach ($job in $Jobs) {
     $jobArgs  = $job.Args
     $jobStart = Get-Date
 
-    Write-Host "[$dateStr] Starting: $label" -ForegroundColor Cyan
+    Write-Console "[$dateStr] Starting: $label" -ForegroundColor Cyan
 
     # Build full argument list: tool + job-specific args
     $fullArgs = @($tool) + $jobArgs
 
-    # Write all output streams to a per-job log file.  This avoids the
-    # Out-String pipeline bottleneck (which accumulates everything in memory
-    # and causes extreme slowdowns under Task Scheduler) and captures
-    # Write-Host / Information stream output that 2>&1 would miss.
+    # Capture all output streams to a per-job log file.  In interactive mode
+    # (default) Tee-Object also streams to the console so --verbose output is
+    # visible in real time.  In headless mode, Out-File sends everything to
+    # the log only — no console output.
     $safeLabel = $label -replace '[^a-zA-Z0-9\-]', '_'
     $jobLog    = Join-Path $logDir "job-${safeLabel}.log"
 
     try {
-        & $spbackupScript @fullArgs *>&1 | Out-File -LiteralPath $jobLog -Encoding utf8
+        if ($Headless) {
+            & $spbackupScript @fullArgs *>&1 | Out-File -LiteralPath $jobLog -Encoding utf8
+        } else {
+            & $spbackupScript @fullArgs *>&1 | Tee-Object -LiteralPath $jobLog
+        }
         $exitCode = $LASTEXITCODE
         if ($null -eq $exitCode) { $exitCode = 0 }
     } catch {
@@ -192,7 +227,7 @@ foreach ($job in $Jobs) {
         2       { 'Yellow' }
         default { 'Red' }
     }
-    Write-Host "[$dateStr] $label - $status (exit $exitCode, $durationStr)" -ForegroundColor $color
+    Write-Console "[$dateStr] $label - $status (exit $exitCode, $durationStr)" -ForegroundColor $color
 
     # Record result FIRST so it's captured even if summary parsing fails
     $result = [ordered]@{
@@ -291,15 +326,15 @@ if ($failedJobs.Count -gt 0) {
 $reportText = $reportLines -join "`r`n"
 
 # Print report to console
-Write-Host ''
-Write-Host $reportText
+Write-Console ''
+Write-Console $reportText
 
 # -----------------------------------------------------------------------------
 # Write report to file
 # -----------------------------------------------------------------------------
 $logFile = Join-Path $logDir "backup-report-$($runStart.ToString('ddMMyyyy-HHmmss')).txt"
 $reportText | Out-File -FilePath $logFile -Encoding utf8
-Write-Host "Report saved to: $logFile" -ForegroundColor DarkGray
+Write-Console "Report saved to: $logFile" -ForegroundColor DarkGray
 
 # -----------------------------------------------------------------------------
 # Send email
@@ -342,10 +377,10 @@ if ($SmtpTo.Count -gt 0 -and $SmtpServer) {
         $message.Dispose()
         $smtpClient.Dispose()
 
-        Write-Host "Email sent to: $($SmtpTo -join ', ')" -ForegroundColor Green
+        Write-Console "Email sent to: $($SmtpTo -join ', ')" -ForegroundColor Green
     } catch {
-        Write-Host "WARNING: Failed to send email: $($_.Exception.Message)" -ForegroundColor Yellow
-        Write-Host "The backup report is still available at: $logFile" -ForegroundColor Yellow
+        Write-Console "WARNING: Failed to send email: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Console "The backup report is still available at: $logFile" -ForegroundColor Yellow
     }
 }
 
@@ -353,16 +388,16 @@ if ($SmtpTo.Count -gt 0 -and $SmtpServer) {
 # Exit
 # -----------------------------------------------------------------------------
 $exitCode = if ($anyFailure) { 1 } else { 0 }
-Write-Host ''
-Write-Host "Orchestrator finished ($overallStatus, exit code $exitCode)" -ForegroundColor $(if ($anyFailure) { 'Yellow' } else { 'Green' })
+Write-Console ''
+Write-Console "Orchestrator finished ($overallStatus, exit code $exitCode)" -ForegroundColor $(if ($anyFailure) { 'Yellow' } else { 'Green' })
 exit $exitCode
 
 } catch {
     # -- Crash handler - the orchestrator itself hit an unhandled error -----
     $crashMsg  = $_.Exception.Message
     $crashLine = $_.InvocationInfo.PositionMessage
-    Write-Host "ORCHESTRATOR ERROR: $crashMsg" -ForegroundColor Red
-    Write-Host $crashLine -ForegroundColor Red
+    Write-Console "ORCHESTRATOR ERROR: $crashMsg" -ForegroundColor Red
+    Write-Console $crashLine -ForegroundColor Red
 
     # Try to send a crash-notification email
     if ($SmtpTo.Count -gt 0 -and $SmtpServer) {
@@ -402,9 +437,9 @@ $($_ | Out-String)
             $client.Send($msg)
             $msg.Dispose()
             $client.Dispose()
-            Write-Host "Crash notification email sent to: $($SmtpTo -join ', ')" -ForegroundColor Yellow
+            Write-Console "Crash notification email sent to: $($SmtpTo -join ', ')" -ForegroundColor Yellow
         } catch {
-            Write-Host "WARNING: Failed to send crash email: $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Console "WARNING: Failed to send crash email: $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
 

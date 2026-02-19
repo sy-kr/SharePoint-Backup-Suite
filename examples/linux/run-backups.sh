@@ -3,11 +3,17 @@
 #  run-backups.sh - Thin wrapper for Run-Backups.ps1 on Linux / macOS.
 #
 #  Loads credentials from an env file, then calls the PowerShell
-#  orchestrator.  Use this as the target for a cron job.
+#  orchestrator.  Use this as the target for a cron job or systemd timer.
+#
+#  -Headless suppresses all console output (recommended for cron / systemd).
+#  Remove it to see verbose output when running interactively.
 #
 #  Usage:
-#    ./run-backups.sh                         # uses /etc/spbackup/env
+#    ./run-backups.sh                         # headless (cron / systemd)
 #    ENV_FILE=/path/to/env ./run-backups.sh   # custom env file
+#
+#  For interactive use with console output:
+#    pwsh -NoProfile -File Run-Backups.ps1
 #
 #  First-time setup:
 #    1. Copy Run-Backups.ps1 to the same directory as spbackup.ps1
@@ -33,4 +39,4 @@ else
     echo "Set TENANT_ID, CLIENT_ID, CLIENT_SECRET before running." >&2
 fi
 
-exec pwsh -NoProfile -NonInteractive -File "${SPBACKUP_DIR}/Run-Backups.ps1"
+exec pwsh -NoProfile -NonInteractive -File "${SPBACKUP_DIR}/Run-Backups.ps1" -Headless

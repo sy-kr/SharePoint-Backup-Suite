@@ -292,7 +292,7 @@ function Download-DriveFile {
             Invoke-GraphRequest -Uri $downloadUri -Raw -OutFile $tmpPath `
                 -DriveId $DriveId -ItemId $itemId | Out-Null
 
-            Move-Item -LiteralPath $tmpPath -Destination $outPath -Force
+            Move-FileReliable -Source $tmpPath -Destination $outPath
             $hash = Get-FileSHA256 -Path $outPath
             $fileSize = (Get-Item -LiteralPath $outPath).Length
 

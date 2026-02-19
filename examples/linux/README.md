@@ -15,8 +15,14 @@ to the cross-platform `Run-Backups.ps1` orchestrator.
 
 2. Create the credential env file
 3. Edit `Run-Backups.ps1` — configure jobs, SMTP, and paths
-4. Test interactively: `./run-backups.sh`
+4. Test interactively: `pwsh -NoProfile -File Run-Backups.ps1`
 5. Add a cron entry (or systemd timer)
+
+> **Interactive vs headless:** Running `Run-Backups.ps1` directly shows all
+> job output (including `--verbose`) in the console.  The `run-backups.sh`
+> wrapper passes `-Headless` which suppresses all console output — only log
+> files and email are produced.  This is the recommended mode for cron /
+> systemd.
 
 ---
 
@@ -134,8 +140,8 @@ journalctl -u spbackup.service --since today
 cron / systemd
   └── run-backups.sh
         ├── source /etc/spbackup/env   (sets TENANT_ID, CLIENT_ID, CLIENT_SECRET)
-        └── exec pwsh Run-Backups.ps1
-              ├── spbackup.ps1 library backup ...
+        └── exec pwsh Run-Backups.ps1 -Headless
+              ├── spbackup.ps1 library backup ...  (output to log files only)
               ├── spbackup.ps1 list backup ...
               ├── spbackup.ps1 loop backup ...
               └── Email report (SMTP)
