@@ -142,6 +142,7 @@ function Get-DriveItemsRecursive {
     )
 
     $files = [System.Collections.Generic.List[object]]::new()
+    $deletedIds = [System.Collections.Generic.List[string]]::new()
     $newDeltaLink = ''
     $totalEnumerated = 0
 
@@ -170,11 +171,18 @@ function Get-DriveItemsRecursive {
         foreach ($item in $items) {
             $totalEnumerated++
 
+            # Skip deleted items in delta responses
+            if ((Test-SafeProp $item 'deleted') -or (Test-SafeProp $item '@removed')) {
+                $delId = Get-SafeProp $item 'id'
+                if ($delId) { $deletedIds.Add($delId) }
+                continue
+            }
+
             # Skip folders (we only want files; folder structure comes from parentReference)
             if (Test-SafeProp $item 'folder') { continue }
 
-            # Skip deleted items in delta responses
-            if (Test-SafeProp $item 'deleted') { continue }
+            # Skip items without a file facet (e.g. sparse delta entries)
+            if (-not (Test-SafeProp $item 'file')) { continue }
 
             # Optional date filter
             if ($SinceDate) {
@@ -205,8 +213,9 @@ function Get-DriveItemsRecursive {
         -Message "Enumeration complete: $totalEnumerated total items, $($files.Count) files"
 
     return @{
-        files     = $files
-        deltaLink = $newDeltaLink
+        files      = $files
+        deletedIds = $deletedIds
+        deltaLink  = $newDeltaLink
     }
 }
 
@@ -469,7 +478,16 @@ function Invoke-LibraryBackupCommand {
 
     $enumResult = Get-DriveItemsRecursive -DriveId $driveId -SinceDate $sinceDate -DeltaLink $(if (-not $force) { $deltaLink } else { '' })
     $allFiles   = $enumResult['files']
+    $deletedIds = $enumResult['deletedIds']
     $newDelta   = $enumResult['deltaLink']
+
+    # Remove eTags for items that were deleted on SharePoint
+    if ($deletedIds.Count -gt 0) {
+        foreach ($delId in $deletedIds) { $fileEtags.Remove($delId) | Out-Null }
+        Write-LogJsonl -Level 'INFO' -Event 'delta_deletions' -DriveId $driveId `
+            -Message "$($deletedIds.Count) file(s) deleted on SharePoint since last sync"
+        Write-Host "  $($deletedIds.Count) file(s) deleted on SharePoint" -ForegroundColor DarkGray
+    }
 
     Write-Host "Found $($allFiles.Count) file(s) in '$driveName'" -ForegroundColor Cyan
 
